@@ -102,6 +102,39 @@ void PhiInst::add_incoming(Value* value, BasicBlock* block) {
     incoming_blocks_.push_back(block);
 }
 
+std::string BasicBlock::name() const {
+    return id() == 0 ? "entry" : ("bb" + std::to_string(id()));
+}
+
+void BasicBlock::push_back(std::unique_ptr<Instruction> inst) {
+    inst->set_parent(this);
+    insts_.push_back(std::move(inst));
+}
+
+void BasicBlock::push_front(std::unique_ptr<Instruction> inst) {
+    inst->set_parent(this);
+    insts_.push_front(std::move(inst));
+}
+
+BasicBlock* Function::create_block() {
+    unsigned id = block_counter_++;
+    auto bb = std::make_unique<BasicBlock>(id, this);
+    BasicBlock* raw = bb.get();
+    blocks_.push_back(std::move(bb));
+    return raw;
+}
+
+BrInst::BrInst(BasicBlock* target) : Instruction(Opcode::Br, Type::Void, 0) {
+    add_operand(target);
+}
+
+CondBrInst::CondBrInst(Value* cond, BasicBlock* t, BasicBlock* f)
+    : Instruction(Opcode::CondBr, Type::Void, 0) {
+    add_operand(cond);
+    add_operand(t);
+    add_operand(f);
+}
+
 ConstantInt* Module::get_constant(int value) {
     auto it = constants_.find(value);
     if (it != constants_.end()) {

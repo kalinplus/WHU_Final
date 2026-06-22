@@ -235,6 +235,68 @@ private:
     unsigned amount_;
 };
 
+enum class FuncRet { Int, Void };
+
+class BasicBlock : public Value {
+public:
+    explicit BasicBlock(unsigned id, Function* parent)
+        : Value(Type::Label, ValueKind::BasicBlock, id), parent_(parent) {}
+
+    std::string name() const override;
+    Function* parent() const { return parent_; }
+
+    void push_back(std::unique_ptr<Instruction> inst);
+    void push_front(std::unique_ptr<Instruction> inst);
+    std::list<std::unique_ptr<Instruction>>& insts() { return insts_; }
+    const std::list<std::unique_ptr<Instruction>>& insts() const { return insts_; }
+
+    Instruction* terminator() const { return insts_.empty() ? nullptr : insts_.back().get(); }
+
+    const std::vector<BasicBlock*>& preds() const { return preds_; }
+    const std::vector<BasicBlock*>& succs() const { return succs_; }
+    void add_pred(BasicBlock* b) { preds_.push_back(b); }
+
+private:
+    Function* parent_;
+    std::list<std::unique_ptr<Instruction>> insts_;
+    std::vector<BasicBlock*> preds_;
+    std::vector<BasicBlock*> succs_;
+    friend class Function;
+};
+
+class Function : public Value {
+public:
+    Function(std::string name, FuncRet ret_type, unsigned param_count, Module* module)
+        : Value(Type::Void, ValueKind::Function, 0),
+          name_(std::move(name)), ret_type_(ret_type), module_(module) {
+        for (unsigned i = 0; i < param_count; ++i) {
+            auto p = std::make_unique<Value>(Type::I32, ValueKind::Param, i);
+            params_.push_back(std::move(p));
+        }
+    }
+
+    std::string name() const override { return "@" + name_; }
+    const std::string& short_name() const { return name_; }
+    FuncRet ret_type() const { return ret_type_; }
+    Module* module() const { return module_; }
+
+    const std::vector<std::unique_ptr<Value>>& params() const { return params_; }
+    Value* param(unsigned i) const { return params_[i].get(); }
+
+    BasicBlock* create_block();  // assigns block id; first created is entry
+    BasicBlock* entry() const { return blocks_.empty() ? nullptr : blocks_.front().get(); }
+    std::list<std::unique_ptr<BasicBlock>>& blocks() { return blocks_; }
+    const std::list<std::unique_ptr<BasicBlock>>& blocks() const { return blocks_; }
+
+private:
+    std::string name_;
+    FuncRet ret_type_;
+    Module* module_;
+    std::vector<std::unique_ptr<Value>> params_;
+    std::list<std::unique_ptr<BasicBlock>> blocks_;
+    unsigned block_counter_ = 0;
+};
+
 class Module {
 public:
     Module() = default;
@@ -247,11 +309,20 @@ public:
 
     const std::vector<std::unique_ptr<GlobalVar>>& globals() const { return globals_; }
 
+    Function* create_function(const std::string& name, FuncRet ret_type, unsigned param_count) {
+        auto f = std::make_unique<Function>(name, ret_type, param_count, this);
+        Function* raw = f.get();
+        functions_.push_back(std::move(f));
+        return raw;
+    }
+    const std::vector<std::unique_ptr<Function>>& functions() const { return functions_; }
+
 private:
     std::unordered_map<int, std::unique_ptr<ConstantInt>> constants_;
     std::vector<std::unique_ptr<GlobalAddr>> global_addrs_;
     std::vector<std::unique_ptr<GlobalVar>> globals_;
     std::vector<std::unique_ptr<Value>> registers_;
+    std::vector<std::unique_ptr<Function>> functions_;
     unsigned value_counter_ = 0;
 };
 

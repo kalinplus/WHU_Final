@@ -91,11 +91,40 @@ void test_instruction_construction() {
     toyc::test::check(store->operand(0) == a && store->operand(1) == b, "store operands ptr,val");
 }
 
+void test_function_and_blocks() {
+    Module m;
+    Function* f = m.create_function("add", FuncRet::Int, /*params=*/2);
+
+    toyc::test::check_eq_str("@add", f->name(), "function name");
+    toyc::test::check(f->ret_type() == FuncRet::Int, "function ret int");
+    toyc::test::check(f->params().size() == 2, "2 params");
+    toyc::test::check_eq_str("%arg.0", f->param(0)->name(), "param 0 name");
+    toyc::test::check_eq_str("%arg.1", f->param(1)->name(), "param 1 name");
+
+    BasicBlock* entry = f->create_block();
+    BasicBlock* bb1 = f->create_block();
+    toyc::test::check_eq_str("entry", entry->name(), "entry label");
+    toyc::test::check_eq_str("bb1", bb1->name(), "bb1 label");
+    toyc::test::check(f->entry() == entry, "entry is first block");
+
+    Value* a = f->param(0);
+    Value* one = m.get_constant(1);
+    auto add = std::make_unique<BinaryInst>(Opcode::Add, a, one, m.fresh_id());
+    auto ret = std::make_unique<RetInst>(nullptr);
+    Instruction* add_raw = add.get();
+    entry->push_back(std::move(add));
+    entry->push_back(std::move(ret));
+    toyc::test::check(add_raw->parent() == entry, "inst parent set");
+    toyc::test::check(entry->terminator()->opcode() == Opcode::Ret, "terminator is ret");
+    toyc::test::check_eq_str("%v.0", add_raw->name(), "add result name %v.0");
+}
+
 }  // namespace
 
 int main() {
     test_use_list_wiring();
     test_constant_pool_and_globals();
     test_instruction_construction();
+    test_function_and_blocks();
     return toyc::test::report();
 }
