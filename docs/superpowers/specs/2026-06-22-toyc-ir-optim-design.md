@@ -36,7 +36,7 @@
 
 ### 3.1 输入契约 —— IRGen 对 AST 的需求（⚠️ 待与前端/sema 对齐）
 
-ToyC 文法（`任务要求.md`）已锁死 AST 必须表达的语法结构种类，无协调空间。但 AST 的 C++ 数据结构形式由前端决定，且前端目前仅有 lexer/token，AST 尚未编写——**现在是中端提需求、参与定义的最佳时机**。IRGen 的硬性需求：
+**前端 Parser 已落地**（lexer/parser/ast/visitor/printer，详见 [`docs/frontend-协作说明.md`](../../frontend-协作说明.md)），AST 结构与 `ASTVisitor` 遍历机制已定型。对照实测：**R4（遍历）、R5（内存）已满足并关闭**；R1/R2/R3（def-use / const 折叠 / 类型）属 Sema 职责、Sema 待实现，传递机制三方案与请求清单见 [`docs/IR-Sema接口请求反馈.md`](../../IR-Sema接口请求反馈.md)。IRGen 的需求：
 
 | # | 需求 | 为什么 | 不满足的后果 |
 |---|------|--------|--------------|
@@ -398,7 +398,9 @@ repeat {
 
 ---
 
-## 11. AST 遍历方式（⚠️ 待与前端/sema 协调，影响 IRGen 代码骨架）
+## 11. AST 遍历方式
+
+> ✅ **已确认**：前端已采用 **Visitor 模式**（`ASTVisitor` + `walk_comp_unit/stmt/expr/block`，见 `include/toyc/ast_visitor.h`）。本节关闭，仅留方案对比备查。
 
 三种方案：
 
