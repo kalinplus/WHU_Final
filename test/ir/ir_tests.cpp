@@ -1,4 +1,5 @@
 #include "toyc/ir.h"
+#include "toyc/ir_builder.h"
 #include "toyc/ir_printer.h"
 
 #include "check.h"
@@ -9,35 +10,25 @@ using namespace toyc;
 
 namespace {
 
-// Local test-only User subclass: a 2-operand user to exercise use-list logic
-// before real instructions exist. Declared in the test file, not in ir.h.
-class TestUser : public User {
-public:
-    TestUser() : User(Type::Void, ValueKind::Register, 0) {
-        operands_.resize(2, nullptr);
-    }
-};
-
 void test_use_list_wiring() {
-    Value a(Type::I32, ValueKind::Register, 0);
-    Value b(Type::I32, ValueKind::Register, 1);
-    TestUser u;
-    u.set_operand(0, &a);
-    u.set_operand(1, &b);
+    Module m;
+    Value* a = m.create_register(Type::I32);
+    Value* b = m.create_register(Type::I32);
+    auto u = std::make_unique<StoreInst>(a, b);  // 2 operands: a(ptr), b(val)
+    User* user = u.get();
 
-    toyc::test::check(u.num_operands() == 2, "user has 2 operands");
-    toyc::test::check(u.operand(0) == &a && u.operand(1) == &b, "operands stored");
-    toyc::test::check(a.uses().size() == 1 && a.uses()[0] == &u, "a used by u");
-    toyc::test::check(b.uses().size() == 1 && b.uses()[0] == &u, "b used by u");
+    toyc::test::check(user->num_operands() == 2, "user has 2 operands");
+    toyc::test::check(user->operand(0) == a && user->operand(1) == b, "operands stored");
+    toyc::test::check(a->uses().size() == 1, "a used");
+    toyc::test::check(b->uses().size() == 1, "b used");
 
-    u.set_operand(0, &b);
-    toyc::test::check(a.uses().empty(), "a no longer used");
-    toyc::test::check(b.uses().size() == 2, "b used twice");
+    user->set_operand(0, b);
+    toyc::test::check(a->uses().empty(), "a no longer used");
+    toyc::test::check(b->uses().size() == 2, "b used twice");
 
-    b.replace_all_uses_with(&a);
-    toyc::test::check(u.operand(0) == &a && u.operand(1) == &a, "both operands now a");
-    toyc::test::check(b.uses().empty(), "b fully replaced");
-    toyc::test::check(a.uses().size() == 2, "a used twice after RAUW");
+    b->replace_all_uses_with(a);
+    toyc::test::check(user->operand(0) == a && user->operand(1) == a, "RAUW rewires");
+    toyc::test::check(b->uses().empty(), "b replaced out");
 }
 
 void test_constant_pool_and_globals() {
@@ -161,6 +152,33 @@ void test_printer_basic() {
     toyc::test::check_eq_str(expected, out.str(), "module print");
 }
 
+void test_builder_matches_printer() {
+    Module m;
+    Function* f = m.create_function("f", FuncRet::Int, 1);
+    BasicBlock* entry = f->create_block();
+    IRBuilder b(m, entry);
+
+    Value* slot = b.create_alloca();
+    b.create_store(slot, f->param(0));
+    Value* loaded = b.create_load(slot);
+    Value* sum = b.create_binary(Opcode::Add, loaded, m.get_constant(1));
+    b.create_ret(sum);
+
+    std::ostringstream out;
+    print_module(m, out);
+
+    std::string expected =
+        "define i32 @f(i32 %arg.0) {\n"
+        "entry:\n"
+        "  %v.0 = alloca i32\n"
+        "  store %v.0, %arg.0\n"
+        "  %v.1 = load %v.0\n"
+        "  %v.2 = add %v.1, 1\n"
+        "  ret %v.2\n"
+        "}\n";
+    toyc::test::check_eq_str(expected, out.str(), "builder output matches direct construction");
+}
+
 }  // namespace
 
 int main() {
@@ -169,5 +187,6 @@ int main() {
     test_instruction_construction();
     test_function_and_blocks();
     test_printer_basic();
+    test_builder_matches_printer();
     return toyc::test::report();
 }
