@@ -139,3 +139,7 @@ ctest --test-dir build -C Debug -R parser_regression
 ## 10. 参考文法
 
 权威文法见 [`任务要求.md`](../../任务要求.md)；Token 对照见 [`词汇翻译表.md`](../../词汇翻译表.md)。
+
+## 11. 测试 Bug 记录
+
+开发与回归测试期间遇到的问题及补丁说明见 [`frontend-测试Bug记录与补丁.md`](./frontend-测试Bug记录与补丁.md)。
