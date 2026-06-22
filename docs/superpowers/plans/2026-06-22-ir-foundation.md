@@ -1557,3 +1557,87 @@ git commit -m "feat(ir): IRBuilder; retire TestUser in favor of real users"
 - **Optimization passes** (design §8): PassManager, ConstProp, DCE, CSE/GVN, CFS, AlgebraicSimplify. → Plan 3.
 - **Driver wiring** (P5): `-dump-ir` flag + PassManager hookup. Blocked on IRGen (needs Sema). → Plan 3 tail / when Sema lands.
 - **IRGen** (AST→non-SSA IR): blocked on Sema; contract frozen, implementation deferred.
+
+---
+
+## 执行状态（2026-06-22 更新）
+
+**状态：✅ Plan 1 全部完成。** 6 个任务全部落地、测试通过、逐任务提交。
+
+### 交付清单
+
+| Task | Commit | 交付物 |
+|------|--------|--------|
+| 1 | `ce97d7f` | `Value`/`User` 核心 + use-list 双向链 + RAUW；`Type`、`ValueKind`、`check.h` 测试骨架、`toyc-ir-tests` CMake target |
+| 2 | `108c297` | `ConstantInt`（uniqued 池）、`GlobalAddr`、`GlobalVar`、`Module::create_register` |
+| 3 | `40a4e95` | `Opcode` 全集 + `Instruction` 层次（§7：Binary/ICmp/Neg/Alloca/Load/Store/Br/CondBr/Ret/Call/Phi/Shl/Shr）+ `opcode_name` |
+| 4 | `a478f5c` | `BasicBlock`/`Function`/`Module` 所有权 + 编号（`%v.N`/`%arg.N`/`entry`/`bbN`）+ `create_function`/`create_block` |
+| 5 | `b699f96` | IR printer（§4.5 格式，`store ptr,val` 顺序、phi `[val,bb]` 语法） |
+| 6 | `c30f532` | `IRBuilder`（`create_*` 全套）；退役 `TestUser`，`test_use_list_wiring` 改用 `StoreInst` |
+
+### 验证
+
+- `./build/toyc-ir-tests` → **46/46 checks passed**
+- `ctest --test-dir build --output-on-failure` → **2/2 passed**（`ir_tests` + `parser_regression` 全过）
+
+### 实现期相对计划的偏差（均为实现细节，未改设计）
+
+1. **`TestUser` 落点调整**：计划里 `TestUser` 曾规划放在 `ir.h` 的 `#ifdef TOYC_IR_TESTS` 内，最终落在 **`test/ir/ir_tests.cpp` 内**（不污染 `ir.h`），Task 6 直接删除，无 CMake `TOYC_IR_TESTS` 宏——比计划更干净。
+2. **`set_operand` 的 nullptr 防御**：Task 1 调试时 `TestUser` 预填 `operands_` 为 `nullptr`，`set_operand` 解引用 `old->remove_use` 段错误；加了对 `old`/`value` 为 nullptr 的判空。这是唯一一处偏离"不加假设性防御"原则的代码，但属内部不变量维护（User 初始 operands 可能为 null），非用户输入边界验证。
+3. **`FuncRet` 用 IR 本地枚举**：`Function` 返回类型用 IR 自己的 `enum class FuncRet { Int, Void }`，不 `#include "toyc/ast.h"`，IR 不依赖前端 AST。
+4. **CMake：`toyc-ir-tests` 显式列出 IR 源文件**：测试 target 不复用 `toyc-compiler` 的源列表，而是单独列 `src/ir/*.cpp`，避免链接器找不到符号。
+
+### 环境交付
+
+- 装了 **CMake 4.0.3**（`pip3 install cmake==4.0.3`，二进制在 `/Users/kalin/miniconda3/bin/cmake`）。
+- 安装方式 + 构建命令追加进 `CLAUDE.md` 的「开发环境 / 工具链」一节。
+
+---
+
+## 接下来要做的（Plan 2 / Plan 3，尚未起草）
+
+Plan 1 之后的纯 IR 工作拆为两份独立 plan，依赖 Plan 1 已冻结的接口（`Module`/`Function`/`BasicBlock`/`Instruction`/`IRBuilder`/printer）。
+
+### Plan 2 —— mem2reg（对应总计划 P3、设计 §6）
+
+把非 SSA IR（alloca/load/store）提升为 SSA（phi + 重命名）。设计文档自评"最复杂、最易出 bug"，需强 TDD。
+
+**需实现的算法链（设计 §6.2）：**
+1. **CFG 重建**：从 terminator 推导每个块的 `succs`，反推 `preds`。Plan 1 的 `BasicBlock` 预留了 `preds_/succs_` 但未维护，需加 `recompute_cfg(Function&)`。
+2. **支配树**：Cooper-Harvey-Kennedy 迭代算法（设计选型，~30 行，ToyC 规模够用），求每个块的 `idom`。
+3. **支配边界 DF**：按定义点集合迭代计算。
+4. **phi 插入**（worklist）：对每个可提升 alloca，从其 store 所在块出发，沿 DF 插 phi 至收敛。
+5. **重命名**（支配树 DFS）：每 alloca 维护当前值栈；`load`→栈顶替换、`store`→压栈；后继块 phi 入边填值。
+6. **清理**：删被提升的 alloca、被替换的 load、被删的 store。
+
+**可提升条件**：ToyC 无 `&`，所有 alloca 理论上可提升（设计 §6.1）。
+
+**测试策略**：手写非 SSA IR（含 if/while/短路，参考 `test/regression/parser/valid/*.tc` 的控制流形态）→ 跑 mem2reg → printer 比对 SSA 形态 + 断言 phi 正确性（incoming 覆盖全部前驱）。设计 §6.3 自检清单逐条覆盖。
+
+**产物**：`include/toyc/mem2reg.h` + `src/ir/mem2reg.cpp`（含 CFG 支配工具，可能拆 `cfg_analysis.h`）。
+
+### Plan 3 —— 优化 pass + driver 接线（对应 P4+P5、设计 §8/§9）
+
+**优化 pass（设计 §8，`-opt` 时启用）：**
+- `PassManager`：`run(Module/Function)`，不动点循环 `while(changed && iter<MAX_ITER=10)`。
+- **ConstProp**：操作数全常量则折叠（含 `sdiv x,0` 不折叠的边界）。
+- **DCE**：从副作用指令反向标 live。
+- **CSE/GVN**：值编号哈希 + icmp 可交换性归一化（设计 §8.4 易错点）。
+- **CFS**：块合并、不可达块删除、常量分支折叠、平凡 phi 化简。
+- **AlgebraicSimplify**：`x+0`/`x*1`/`x*2^n→shl`（设计 §8.6，引入 `shl`，Plan 1 已支持）、`neg neg`。
+
+**pass 顺序**（设计 §9）：`mem2reg → repeat{ConstProp,DCE,CSE,CFS,AlgebraicSimp} until !changed`。
+
+**driver 接线（P5）：**
+- `options` 加 `-dump-ir`（参考已有 `dump_ast`/`opt_mode`）。
+- PassManager 作为可调用单元就位；但因无 IRGen（阻塞于 Sema），driver 暂不产 IR，端到端不通。
+
+**测试策略**：每个 pass 手写 IR→跑→printer 比对；pass 间组合用设计 §12 的"开/关优化退出码一致"降级对照（需 codegen，故部分降级对照延后）。
+
+**产物**：`include/toyc/opt/*.h` + `src/opt/*.cpp`；`options.h/cpp` 改动。
+
+### 阻塞项（非本组可解）
+
+- **Plan 2/3 的端到端验证**依赖 codegen（分工第 4 人，未实现）+ IRGen（依赖 Sema，`src/sema/` 仍空）。中端的 pass 级正确性可凭手写 IR 单测独立保证，但"优化保持语义"的退出码对照要等 codegen。
+- IRGen↔Sema 接口已冻结（`IR-Sema接口请求反馈-前端组.md`），待 Sema 实现 `analyze()` 即可接 IRGen。
+
