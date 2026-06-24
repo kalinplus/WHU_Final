@@ -276,7 +276,13 @@ struct Mem2RegCtx {
                 } else if (op == Opcode::Store) {
                     if (alloca_of((*it)->operand(0))) del = true;
                 }
-                it = del ? insts.erase(it) : std::next(it);
+                if (del) {
+                    for (unsigned k = 0; k < (*it)->num_operands(); ++k)
+                        (*it)->operand(k)->remove_use(it->get());
+                    it = insts.erase(it);
+                } else {
+                    it = std::next(it);
+                }
             }
         }
         // Pass 2: erase promotable allocas (after all their users are gone).
@@ -286,6 +292,8 @@ struct Mem2RegCtx {
             for (auto it = insts.begin(); it != insts.end(); ) {
                 if ((*it)->opcode() == Opcode::Alloca &&
                     promotable_set.count(static_cast<AllocaInst*>(it->get()))) {
+                    for (unsigned k = 0; k < (*it)->num_operands(); ++k)
+                        (*it)->operand(k)->remove_use(it->get());
                     it = insts.erase(it);
                 } else {
                     it = std::next(it);

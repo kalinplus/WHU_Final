@@ -400,6 +400,43 @@ void test_mem2reg_full_ssa() {
     toyc::test::check_eq_str(expected, out.str(), "full ssa print");
 }
 
+void test_mem2reg_cleanup_use_lists() {
+    // Regression: mem2reg erase must detach operand use-lists before destroying
+    // the instruction, otherwise surviving values hold dangling User* pointers.
+    // Construct: a surviving def %x stored to a promotable alloca, then exercise
+    // replace_all_uses_with on %x post-mem2reg.
+    Module m;
+    Function* f = m.create_function("main", FuncRet::Int, 0);
+    BasicBlock* entry = f->create_block();
+
+    auto alloca = std::make_unique<AllocaInst>(m.fresh_id());
+    AllocaInst* slot = alloca.get();
+    entry->push_back(std::move(alloca));
+    entry->push_back(std::make_unique<StoreInst>(slot, m.get_constant(0)));
+
+    // Surviving instruction whose value is stored to the promotable alloca.
+    auto x_inst = std::make_unique<BinaryInst>(Opcode::Add, m.get_constant(1), m.get_constant(2), m.fresh_id());
+    Value* x = x_inst.get();
+    entry->push_back(std::move(x_inst));
+    entry->push_back(std::make_unique<StoreInst>(slot, x));  // this store will be erased by mem2reg
+
+    entry->push_back(std::make_unique<RetInst>(m.get_constant(0)));
+
+    mem2reg(*f);
+
+    // The key: iterating uses of the surviving value %x must not crash.
+    for ([[maybe_unused]] User* u : x->uses()) {
+        // just iterate; would UAF without the fix
+    }
+
+    // replace_all_uses_with on %x must not crash (the exact scenario that hit UAF).
+    Value* c = m.get_constant(99);
+    x->replace_all_uses_with(c);
+
+    toyc::test::check(x->uses().empty(), "m2r-use: x has no uses after RAUW");
+    toyc::test::check(true, "m2r-use: no crash iterating dangling use-list");
+}
+
 void test_constprop_folds_binary() {
     Module m;
     Function* f = m.create_function("f", FuncRet::Int, 0);
@@ -644,6 +681,7 @@ int main() {
     test_mem2reg_inserts_phi();
     test_mem2reg_rename();
     test_mem2reg_full_ssa();
+    test_mem2reg_cleanup_use_lists();
     test_constprop_folds_binary();
     test_constprop_propagates_chain();
     test_constprop_skips_div_zero();
