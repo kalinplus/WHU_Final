@@ -265,6 +265,36 @@ void test_dom_frontier() {
     toyc::test::check(dt.dom_frontier(exit).empty(), "df: DF(exit) empty");
 }
 
+void test_mem2reg_inserts_phi() {
+    // int a; a=0; if(1){a=1;}else{a=2;} return a;  -> phi at merge.
+    Module m;
+    Function* f = m.create_function("main", FuncRet::Int, 0);
+    BasicBlock* entry = f->create_block();
+    BasicBlock* then = f->create_block();
+    BasicBlock* els = f->create_block();
+    BasicBlock* merge = f->create_block();
+
+    auto alloca = std::make_unique<AllocaInst>(m.fresh_id());   // %v.0
+    AllocaInst* a = alloca.get();
+    entry->push_back(std::move(alloca));
+    entry->push_back(std::make_unique<StoreInst>(a, m.get_constant(0)));
+    entry->push_back(std::make_unique<CondBrInst>(m.get_constant(1), then, els));
+    then->push_back(std::make_unique<StoreInst>(a, m.get_constant(1)));
+    then->push_back(std::make_unique<BrInst>(merge));
+    els->push_back(std::make_unique<StoreInst>(a, m.get_constant(2)));
+    els->push_back(std::make_unique<BrInst>(merge));
+    merge->push_back(std::make_unique<LoadInst>(a, m.fresh_id()));
+    merge->push_back(std::make_unique<RetInst>(nullptr));
+
+    mem2reg(*f);
+    bool merge_has_phi = false;
+    for (const std::unique_ptr<Instruction>& inst : merge->insts()) {
+        if (inst->opcode() == Opcode::Phi) { merge_has_phi = true; break; }
+    }
+    toyc::test::check(merge_has_phi, "m2r: phi inserted at merge");
+    toyc::test::check(then->insts().front()->opcode() != Opcode::Phi, "m2r: no phi at then");
+}
+
 }  // namespace
 
 int main() {
@@ -278,5 +308,6 @@ int main() {
     test_dominator_tree_diamond();
     test_dominator_tree_loop();
     test_dom_frontier();
+    test_mem2reg_inserts_phi();
     return toyc::test::report();
 }

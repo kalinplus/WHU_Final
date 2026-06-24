@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace toyc {
@@ -123,6 +125,83 @@ void DominatorTree::analyze(Function& fn) {
                 runner = idom_[runner];
             }
         }
+    }
+}
+
+namespace {
+
+struct Mem2RegCtx {
+    Function& fn;
+    Module* mod;
+    DominatorTree dt;
+    std::vector<AllocaInst*> promotable;
+    std::unordered_map<AllocaInst*, bool> promotable_set;
+    std::unordered_map<PhiInst*, AllocaInst*> phi_alloca;
+
+    explicit Mem2RegCtx(Function& f) : fn(f), mod(f.module()) { dt.analyze(fn); }
+
+    void run() {
+        collect_promotable();
+        for (AllocaInst* a : promotable) insert_phi(a);
+        rename();     // Task 4
+        cleanup();    // Task 5
+    }
+
+    void collect_promotable() {
+        for (const std::unique_ptr<Instruction>& inst : fn.entry()->insts()) {
+            if (inst->opcode() != Opcode::Alloca) continue;
+            AllocaInst* a = static_cast<AllocaInst*>(inst.get());
+            bool ok = true;
+            for (User* u : a->uses()) {
+                Opcode op = static_cast<Instruction*>(u)->opcode();
+                if (op != Opcode::Load && op != Opcode::Store) { ok = false; break; }
+            }
+            if (ok) {
+                promotable.push_back(a);
+                promotable_set[a] = true;
+            }
+        }
+    }
+
+    void insert_phi(AllocaInst* a) {
+        std::unordered_set<BasicBlock*> has_phi;
+        std::vector<BasicBlock*> worklist;
+        for (User* u : a->uses()) {
+            Instruction* inst = static_cast<Instruction*>(u);
+            if (inst->opcode() == Opcode::Store) {
+                worklist.push_back(inst->parent());
+            }
+        }
+        while (!worklist.empty()) {
+            BasicBlock* x = worklist.back();
+            worklist.pop_back();
+            for (BasicBlock* y : dt.dom_frontier(x)) {
+                if (has_phi.count(y)) continue;
+                auto phi = std::make_unique<PhiInst>(mod->fresh_id());
+                PhiInst* raw = phi.get();
+                y->push_front(std::move(phi));
+                has_phi.insert(y);
+                phi_alloca[raw] = a;
+                worklist.push_back(y);
+            }
+        }
+    }
+
+    void rename() { /* Task 4 */ }
+    void cleanup() { /* Task 5 */ }
+};
+
+}  // namespace
+
+void mem2reg(Function& fn) {
+    if (!fn.entry()) return;
+    Mem2RegCtx ctx(fn);
+    ctx.run();
+}
+
+void mem2reg(Module& module) {
+    for (const std::unique_ptr<Function>& fn : module.functions()) {
+        mem2reg(*fn);
     }
 }
 
