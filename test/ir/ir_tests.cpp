@@ -295,6 +295,47 @@ void test_mem2reg_inserts_phi() {
     toyc::test::check(then->insts().front()->opcode() != Opcode::Phi, "m2r: no phi at then");
 }
 
+void test_mem2reg_rename() {
+    Module m;
+    Function* f = m.create_function("main", FuncRet::Int, 0);
+    BasicBlock* entry = f->create_block();
+    BasicBlock* then = f->create_block();
+    BasicBlock* els = f->create_block();
+    BasicBlock* merge = f->create_block();
+
+    auto alloca = std::make_unique<AllocaInst>(m.fresh_id());   // %v.0
+    AllocaInst* a = alloca.get();
+    entry->push_back(std::move(alloca));
+    entry->push_back(std::make_unique<StoreInst>(a, m.get_constant(0)));
+    entry->push_back(std::make_unique<CondBrInst>(m.get_constant(1), then, els));
+    then->push_back(std::make_unique<StoreInst>(a, m.get_constant(1)));
+    then->push_back(std::make_unique<BrInst>(merge));
+    els->push_back(std::make_unique<StoreInst>(a, m.get_constant(2)));
+    els->push_back(std::make_unique<BrInst>(merge));
+    auto load = std::make_unique<LoadInst>(a, m.fresh_id());    // %v.1
+    LoadInst* load_raw = load.get();
+    merge->push_back(std::move(load));
+    merge->push_back(std::make_unique<RetInst>(load_raw));
+
+    mem2reg(*f);
+
+    // ret operand should now be the phi (not the deleted load).
+    Instruction* term = merge->terminator();
+    toyc::test::check(term->opcode() == Opcode::Ret, "rename: merge ends in ret");
+    toyc::test::check(term->operand(0)->value_kind() != ValueKind::Register ||
+                      term->operand(0) != load_raw, "rename: ret no longer uses old load");
+    bool ret_uses_phi = term->operand(0) != nullptr &&
+                        term->operand(0)->value_kind() == ValueKind::Register;
+    // find the phi in merge
+    PhiInst* phi = nullptr;
+    for (const std::unique_ptr<Instruction>& inst : merge->insts()) {
+        if (inst->opcode() == Opcode::Phi) { phi = static_cast<PhiInst*>(inst.get()); break; }
+    }
+    toyc::test::check(phi != nullptr, "rename: merge has phi");
+    toyc::test::check(phi && phi->num_operands() == 2, "rename: phi has 2 incoming");
+    toyc::test::check(phi && term->operand(0) == phi, "rename: ret uses phi");
+}
+
 }  // namespace
 
 int main() {
@@ -309,5 +350,6 @@ int main() {
     test_dominator_tree_loop();
     test_dom_frontier();
     test_mem2reg_inserts_phi();
+    test_mem2reg_rename();
     return toyc::test::report();
 }

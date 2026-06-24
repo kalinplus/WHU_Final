@@ -103,6 +103,9 @@ void DominatorTree::analyze(Function& fn) {
     }
 
     // Dom-tree children, filled in reverse postorder for deterministic DFS.
+    for (const std::unique_ptr<BasicBlock>& owner : fn.blocks()) {
+        children_[owner.get()];
+    }
     for (auto it = postorder.rbegin(); it != postorder.rend(); ++it) {
         BasicBlock* b = *it;
         if (b != entry) {
@@ -187,7 +190,75 @@ struct Mem2RegCtx {
         }
     }
 
-    void rename() { /* Task 4 */ }
+    using Stacks = std::unordered_map<AllocaInst*, std::vector<Value*>>;
+
+    void rename() {
+        Stacks stacks;
+        for (AllocaInst* a : promotable) stacks[a];
+        rename_block(fn.entry(), stacks);
+    }
+
+    AllocaInst* alloca_of(Value* v) const {
+        AllocaInst* a = static_cast<AllocaInst*>(v);
+        return promotable_set.count(a) ? a : nullptr;
+    }
+
+    void rename_block(BasicBlock* bb, Stacks& stacks) {
+        std::vector<AllocaInst*> pushed;
+
+        // Phis at block front define new values for their allocas.
+        for (const std::unique_ptr<Instruction>& inst : bb->insts()) {
+            if (inst->opcode() != Opcode::Phi) break;
+            PhiInst* phi = static_cast<PhiInst*>(inst.get());
+            auto it = phi_alloca.find(phi);
+            if (it != phi_alloca.end()) {
+                stacks[it->second].push_back(phi);
+                pushed.push_back(it->second);
+            }
+        }
+
+        // Rewrite loads / record stores.
+        for (const std::unique_ptr<Instruction>& inst : bb->insts()) {
+            Opcode op = inst->opcode();
+            if (op == Opcode::Phi) continue;
+            if (op == Opcode::Load) {
+                AllocaInst* a = alloca_of(inst->operand(0));
+                if (a) {
+                    assert(!stacks[a].empty() && "load before any store");
+                    inst->replace_all_uses_with(stacks[a].back());
+                }
+            } else if (op == Opcode::Store) {
+                AllocaInst* a = alloca_of(inst->operand(0));
+                if (a) {
+                    stacks[a].push_back(inst->operand(1));
+                    pushed.push_back(a);
+                }
+            }
+        }
+
+        // Fill successor phis with the current value for this block's edge.
+        for (BasicBlock* s : dt.succs(bb)) {
+            for (const std::unique_ptr<Instruction>& inst : s->insts()) {
+                if (inst->opcode() != Opcode::Phi) break;
+                PhiInst* phi = static_cast<PhiInst*>(inst.get());
+                auto it = phi_alloca.find(phi);
+                if (it == phi_alloca.end()) continue;
+                assert(!stacks[it->second].empty() && "phi edge with no defining value");
+                phi->add_incoming(stacks[it->second].back(), bb);
+            }
+        }
+
+        // Recurse over dominator-tree children (RPO-ordered -> deterministic).
+        for (BasicBlock* c : dt.children(bb)) {
+            rename_block(c, stacks);
+        }
+
+        // Pop everything this block pushed.
+        for (auto it = pushed.rbegin(); it != pushed.rend(); ++it) {
+            stacks[*it].pop_back();
+        }
+    }
+
     void cleanup() { /* Task 5 */ }
 };
 
