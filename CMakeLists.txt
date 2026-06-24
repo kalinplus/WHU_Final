@@ -82,3 +82,10 @@ add_test(
         -DCOMPILER=$<TARGET_FILE:toyc-compiler>
         -P ${CMAKE_SOURCE_DIR}/test/regression/mem2reg/run_mem2reg.cmake
 )
+
+add_test(
+    NAME optim_regression
+    COMMAND ${CMAKE_COMMAND}
+        -DCOMPILER=$<TARGET_FILE:toyc-compiler>
+        -P ${CMAKE_SOURCE_DIR}/test/regression/optim/run_optim.cmake
+)
