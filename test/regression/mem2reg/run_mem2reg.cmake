@@ -13,7 +13,7 @@ foreach(test_name IN LISTS tests)
     string(REGEX REPLACE "\\.tc$" ".expected" exp "${tc}")
 
     execute_process(
-        COMMAND "${COMPILER}" -dump-ir -opt
+        COMMAND "${COMPILER}" -dump-ir -mem2reg-only
         INPUT_FILE "${tc}"
         OUTPUT_QUIET
         ERROR_VARIABLE actual
