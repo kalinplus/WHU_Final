@@ -2,104 +2,108 @@
 #include "toyc/ir_builder.h"
 #include "toyc/ir_printer.h"
 
-#include "check.h"
-
+#include <gtest/gtest.h>
 #include <sstream>
 
 using namespace toyc;
 
 namespace {
 
-void test_use_list_wiring() {
+TEST(IR, UseListWiring) {
     Module m;
     Value* a = m.create_register(Type::I32);
     Value* b = m.create_register(Type::I32);
     auto u = std::make_unique<StoreInst>(a, b);  // 2 operands: a(ptr), b(val)
     User* user = u.get();
 
-    toyc::test::check(user->num_operands() == 2, "user has 2 operands");
-    toyc::test::check(user->operand(0) == a && user->operand(1) == b, "operands stored");
-    toyc::test::check(a->uses().size() == 1, "a used");
-    toyc::test::check(b->uses().size() == 1, "b used");
+    EXPECT_EQ(2, user->num_operands());
+    EXPECT_EQ(a, user->operand(0));
+    EXPECT_EQ(b, user->operand(1));
+    EXPECT_EQ(1, a->uses().size());
+    EXPECT_EQ(1, b->uses().size());
 
     user->set_operand(0, b);
-    toyc::test::check(a->uses().empty(), "a no longer used");
-    toyc::test::check(b->uses().size() == 2, "b used twice");
+    EXPECT_TRUE(a->uses().empty());
+    EXPECT_EQ(2, b->uses().size());
 
     b->replace_all_uses_with(a);
-    toyc::test::check(user->operand(0) == a && user->operand(1) == a, "RAUW rewires");
-    toyc::test::check(b->uses().empty(), "b replaced out");
+    EXPECT_EQ(a, user->operand(0));
+    EXPECT_EQ(a, user->operand(1));
+    EXPECT_TRUE(b->uses().empty());
 }
 
-void test_constant_pool_and_globals() {
+TEST(IR, ConstantPoolAndGlobals) {
     Module m;
     ConstantInt* c1 = m.get_constant(42);
     ConstantInt* c2 = m.get_constant(42);
     ConstantInt* c3 = m.get_constant(7);
 
-    toyc::test::check(c1 == c2, "constant 42 uniqued");
-    toyc::test::check(c1 != c3, "constant 7 distinct");
-    toyc::test::check(c1->value() == 42, "constant value 42");
-    toyc::test::check_eq_str("42", c1->name(), "constant name is literal");
+    EXPECT_EQ(c1, c2);
+    EXPECT_NE(c1, c3);
+    EXPECT_EQ(42, c1->value());
+    EXPECT_EQ("42", c1->name());
 
     GlobalVar* g = m.create_global("g_count", 0, /*is_const=*/false);
-    toyc::test::check_eq_str("@g_count", g->addr->name(), "global addr name");
-    toyc::test::check(g->addr->type() == Type::Ptr, "global addr is ptr");
-    toyc::test::check(g->init->value() == 0, "global init value");
-    toyc::test::check(!g->is_const, "global is var not const");
+    EXPECT_EQ("@g_count", g->addr->name());
+    EXPECT_EQ(Type::Ptr, g->addr->type());
+    EXPECT_EQ(0, g->init->value());
+    EXPECT_FALSE(g->is_const);
 
     Value* r = m.create_register(Type::I32);
-    toyc::test::check_eq_str("%v.0", r->name(), "register name %v.0");
-    toyc::test::check(r->type() == Type::I32, "register type i32");
+    EXPECT_EQ("%v.0", r->name());
+    EXPECT_EQ(Type::I32, r->type());
 }
 
-void test_instruction_construction() {
+TEST(IR, InstructionConstruction) {
     Module m;
     Value* a = m.create_register(Type::I32);
     Value* b = m.create_register(Type::I32);
 
     auto add = std::make_unique<BinaryInst>(Opcode::Add, a, b, m.fresh_id());
-    toyc::test::check(add->opcode() == Opcode::Add, "add opcode");
-    toyc::test::check(add->type() == Type::I32, "add result i32");
-    toyc::test::check(add->has_result(), "add has result");
-    toyc::test::check(add->operand(0) == a && add->operand(1) == b, "add operands");
-    toyc::test::check(add->num_operands() == 2, "add 2 operands");
-    toyc::test::check(!add->is_terminator(), "add not terminator");
-    toyc::test::check(a->uses().size() == 1, "a used by add");
+    EXPECT_EQ(Opcode::Add, add->opcode());
+    EXPECT_EQ(Type::I32, add->type());
+    EXPECT_TRUE(add->has_result());
+    EXPECT_EQ(a, add->operand(0));
+    EXPECT_EQ(b, add->operand(1));
+    EXPECT_EQ(2, add->num_operands());
+    EXPECT_FALSE(add->is_terminator());
+    EXPECT_EQ(1, a->uses().size());
 
     auto slt = std::make_unique<ICmpInst>(Opcode::ICmpSlt, a, b, m.fresh_id());
-    toyc::test::check(slt->opcode() == Opcode::ICmpSlt && slt->type() == Type::I32, "icmp i32 result");
+    EXPECT_EQ(Opcode::ICmpSlt, slt->opcode());
+    EXPECT_EQ(Type::I32, slt->type());
 
     ConstantInt* one = m.get_constant(1);
     auto ret = std::make_unique<RetInst>(one);
-    toyc::test::check(ret->is_terminator(), "ret terminator");
-    toyc::test::check(!ret->has_result(), "ret has no result");
-    toyc::test::check(ret->operand(0) == one, "ret operand");
+    EXPECT_TRUE(ret->is_terminator());
+    EXPECT_FALSE(ret->has_result());
+    EXPECT_EQ(one, ret->operand(0));
 
     auto ret_void = std::make_unique<RetInst>(/*value=*/nullptr);
-    toyc::test::check(ret_void->num_operands() == 0, "void ret 0 operands");
+    EXPECT_EQ(0, ret_void->num_operands());
 
     auto store = std::make_unique<StoreInst>(a, b);
-    toyc::test::check(store->opcode() == Opcode::Store, "store opcode");
-    toyc::test::check(!store->has_result(), "store has no result");
-    toyc::test::check(store->operand(0) == a && store->operand(1) == b, "store operands ptr,val");
+    EXPECT_EQ(Opcode::Store, store->opcode());
+    EXPECT_FALSE(store->has_result());
+    EXPECT_EQ(a, store->operand(0));
+    EXPECT_EQ(b, store->operand(1));
 }
 
-void test_function_and_blocks() {
+TEST(IR, FunctionAndBlocks) {
     Module m;
     Function* f = m.create_function("add", FuncRet::Int, /*params=*/2);
 
-    toyc::test::check_eq_str("@add", f->name(), "function name");
-    toyc::test::check(f->ret_type() == FuncRet::Int, "function ret int");
-    toyc::test::check(f->params().size() == 2, "2 params");
-    toyc::test::check_eq_str("%arg.0", f->param(0)->name(), "param 0 name");
-    toyc::test::check_eq_str("%arg.1", f->param(1)->name(), "param 1 name");
+    EXPECT_EQ("@add", f->name());
+    EXPECT_EQ(FuncRet::Int, f->ret_type());
+    EXPECT_EQ(2, f->params().size());
+    EXPECT_EQ("%arg.0", f->param(0)->name());
+    EXPECT_EQ("%arg.1", f->param(1)->name());
 
     BasicBlock* entry = f->create_block();
     BasicBlock* bb1 = f->create_block();
-    toyc::test::check_eq_str("entry", entry->name(), "entry label");
-    toyc::test::check_eq_str("bb1", bb1->name(), "bb1 label");
-    toyc::test::check(f->entry() == entry, "entry is first block");
+    EXPECT_EQ("entry", entry->name());
+    EXPECT_EQ("bb1", bb1->name());
+    EXPECT_EQ(entry, f->entry());
 
     Value* a = f->param(0);
     Value* one = m.get_constant(1);
@@ -108,12 +112,13 @@ void test_function_and_blocks() {
     Instruction* add_raw = add.get();
     entry->push_back(std::move(add));
     entry->push_back(std::move(ret));
-    toyc::test::check(add_raw->parent() == entry, "inst parent set");
-    toyc::test::check(entry->terminator()->opcode() == Opcode::Ret, "terminator is ret");
-    toyc::test::check_eq_str("%v.0", add_raw->name(), "add result name %v.0");
+    EXPECT_EQ(entry, add_raw->parent());
+    ASSERT_NE(nullptr, entry->terminator());
+    EXPECT_EQ(Opcode::Ret, entry->terminator()->opcode());
+    EXPECT_EQ("%v.0", add_raw->name());
 }
 
-void test_printer_basic() {
+TEST(IR, PrinterBasic) {
     Module m;
     m.create_global("g_count", 0, /*is_const=*/false);
     Function* f = m.create_function("f", FuncRet::Int, /*params=*/1);
@@ -149,10 +154,10 @@ void test_printer_basic() {
         "  %v.2 = add %v.1, 1\n"
         "  ret %v.2\n"
         "}\n";
-    toyc::test::check_eq_str(expected, out.str(), "module print");
+    EXPECT_EQ(expected, out.str());
 }
 
-void test_builder_matches_printer() {
+TEST(IR, BuilderMatchesPrinter) {
     Module m;
     Function* f = m.create_function("f", FuncRet::Int, 1);
     BasicBlock* entry = f->create_block();
@@ -176,17 +181,7 @@ void test_builder_matches_printer() {
         "  %v.2 = add %v.1, 1\n"
         "  ret %v.2\n"
         "}\n";
-    toyc::test::check_eq_str(expected, out.str(), "builder output matches direct construction");
+    EXPECT_EQ(expected, out.str());
 }
 
 }  // namespace
-
-int main() {
-    test_use_list_wiring();
-    test_constant_pool_and_globals();
-    test_instruction_construction();
-    test_function_and_blocks();
-    test_printer_basic();
-    test_builder_matches_printer();
-    return toyc::test::report();
-}

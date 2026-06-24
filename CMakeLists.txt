@@ -5,8 +5,29 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(toyc-compiler
-    src/driver/main.cpp
+include(FetchContent)
+
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0
+)
+
+if(MSVC)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+endif()
+
+FetchContent_MakeAvailable(googletest)
+
+function(toyc_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+add_library(toyc-core
     src/driver/options.cpp
     src/driver/diagnostics.cpp
     src/frontend/token.cpp
@@ -25,13 +46,14 @@ add_executable(toyc-compiler
     src/ir/irgen.cpp
 )
 
-target_include_directories(toyc-compiler PRIVATE include)
+target_include_directories(toyc-core PUBLIC include)
+toyc_enable_warnings(toyc-core)
 
-if(MSVC)
-    target_compile_options(toyc-compiler PRIVATE /W4 /utf-8)
-else()
-    target_compile_options(toyc-compiler PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+add_executable(toyc-compiler
+    src/driver/main.cpp
+)
+target_link_libraries(toyc-compiler PRIVATE toyc-core)
+toyc_enable_warnings(toyc-compiler)
 
 enable_testing()
 
@@ -44,19 +66,12 @@ add_test(
 
 add_executable(toyc-ir-tests
     test/ir/ir_tests.cpp
-    src/ir/ir.cpp
-    src/ir/ir_printer.cpp
-    src/ir/ir_builder.cpp
 )
-target_include_directories(toyc-ir-tests PRIVATE include test/ir)
-if(NOT MSVC)
-    target_compile_options(toyc-ir-tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+target_link_libraries(toyc-ir-tests PRIVATE toyc-core GTest::gtest_main)
+toyc_enable_warnings(toyc-ir-tests)
 
-add_test(
-    NAME ir_tests
-    COMMAND toyc-ir-tests
-)
+include(GoogleTest)
+gtest_discover_tests(toyc-ir-tests)
 
 add_test(
     NAME irgen_regression
