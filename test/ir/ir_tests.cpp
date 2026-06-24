@@ -1,6 +1,7 @@
 #include "toyc/ir.h"
 #include "toyc/ir_builder.h"
 #include "toyc/ir_printer.h"
+#include "toyc/mem2reg.h"
 
 #include "check.h"
 
@@ -179,6 +180,67 @@ void test_builder_matches_printer() {
     toyc::test::check_eq_str(expected, out.str(), "builder output matches direct construction");
 }
 
+void test_dominator_tree_straight() {
+    Module m;
+    Function* f = m.create_function("f", FuncRet::Int, 0);
+    BasicBlock* entry = f->create_block();   // entry
+    BasicBlock* mid = f->create_block();     // bb1
+    BasicBlock* end = f->create_block();     // bb2
+    entry->push_back(std::make_unique<BrInst>(mid));
+    mid->push_back(std::make_unique<BrInst>(end));
+    end->push_back(std::make_unique<RetInst>(m.get_constant(0)));
+
+    DominatorTree dt;
+    dt.analyze(*f);
+    toyc::test::check(dt.idom(entry) == entry, "straight: entry idom self");
+    toyc::test::check(dt.idom(mid) == entry, "straight: mid idom entry");
+    toyc::test::check(dt.idom(end) == mid, "straight: end idom mid");
+    toyc::test::check(dt.succs(entry).size() == 1 && dt.succs(entry)[0] == mid, "straight: entry succ mid");
+    toyc::test::check(dt.preds(end).size() == 1 && dt.preds(end)[0] == mid, "straight: end pred mid");
+}
+
+void test_dominator_tree_diamond() {
+    Module m;
+    Function* f = m.create_function("f", FuncRet::Int, 0);
+    BasicBlock* entry = f->create_block();
+    BasicBlock* then = f->create_block();   // bb1
+    BasicBlock* els = f->create_block();    // bb2
+    BasicBlock* merge = f->create_block();  // bb3
+    Value* c = m.get_constant(1);
+    entry->push_back(std::make_unique<CondBrInst>(c, then, els));
+    then->push_back(std::make_unique<BrInst>(merge));
+    els->push_back(std::make_unique<BrInst>(merge));
+    merge->push_back(std::make_unique<RetInst>(m.get_constant(0)));
+
+    DominatorTree dt;
+    dt.analyze(*f);
+    toyc::test::check(dt.idom(then) == entry, "diamond: then idom entry");
+    toyc::test::check(dt.idom(els) == entry, "diamond: els idom entry");
+    toyc::test::check(dt.idom(merge) == entry, "diamond: merge idom entry");
+    toyc::test::check(dt.preds(merge).size() == 2, "diamond: merge 2 preds");
+    toyc::test::check(dt.children(entry).size() == 3, "diamond: entry 3 dom children");
+}
+
+void test_dominator_tree_loop() {
+    Module m;
+    Function* f = m.create_function("f", FuncRet::Int, 0);
+    BasicBlock* entry = f->create_block();
+    BasicBlock* header = f->create_block();  // bb1
+    BasicBlock* body = f->create_block();    // bb2
+    BasicBlock* exit = f->create_block();    // bb3
+    entry->push_back(std::make_unique<BrInst>(header));
+    header->push_back(std::make_unique<CondBrInst>(m.get_constant(1), body, exit));
+    body->push_back(std::make_unique<BrInst>(header));   // back edge
+    exit->push_back(std::make_unique<RetInst>(m.get_constant(0)));
+
+    DominatorTree dt;
+    dt.analyze(*f);
+    toyc::test::check(dt.idom(header) == entry, "loop: header idom entry");
+    toyc::test::check(dt.idom(body) == header, "loop: body idom header");
+    toyc::test::check(dt.idom(exit) == header, "loop: exit idom header");
+    toyc::test::check(dt.preds(header).size() == 2, "loop: header 2 preds (entry+body)");
+}
+
 }  // namespace
 
 int main() {
@@ -188,5 +250,8 @@ int main() {
     test_function_and_blocks();
     test_printer_basic();
     test_builder_matches_printer();
+    test_dominator_tree_straight();
+    test_dominator_tree_diamond();
+    test_dominator_tree_loop();
     return toyc::test::report();
 }

@@ -23,6 +23,7 @@ add_executable(toyc-compiler
     src/ir/ir_printer.cpp
     src/ir/ir_builder.cpp
     src/ir/irgen.cpp
+    src/ir/mem2reg.cpp
 )
 
 target_include_directories(toyc-compiler PRIVATE include)
@@ -47,6 +48,7 @@ add_executable(toyc-ir-tests
     src/ir/ir.cpp
     src/ir/ir_printer.cpp
     src/ir/ir_builder.cpp
+    src/ir/mem2reg.cpp
 )
 target_include_directories(toyc-ir-tests PRIVATE include test/ir)
 if(NOT MSVC)
