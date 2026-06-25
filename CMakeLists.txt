@@ -48,7 +48,9 @@ add_library(toyc-core
     src/ir/irgen.cpp
     src/ir/mem2reg.cpp
     src/ir/optim.cpp
+    src/codegen/asm_writer.cpp
     src/codegen/codegen.cpp
+    src/codegen/riscv.cpp
 )
 
 target_include_directories(toyc-core PUBLIC include)
