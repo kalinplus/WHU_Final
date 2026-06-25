@@ -46,6 +46,8 @@ add_library(toyc-core
     src/ir/ir_printer.cpp
     src/ir/ir_builder.cpp
     src/ir/irgen.cpp
+    src/ir/mem2reg.cpp
+    src/ir/optim.cpp
 )
 
 target_include_directories(toyc-core PUBLIC include)
