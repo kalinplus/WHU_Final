@@ -27,6 +27,7 @@ build-run file=sample flags="-dump-ast": build
 test: build
     {{build_dir}}/toyc-frontend-tests
     {{build_dir}}/toyc-ir-tests
+    {{build_dir}}/toyc-codegen-tests
 
 test-frontend: build
     {{build_dir}}/toyc-frontend-tests
@@ -34,9 +35,16 @@ test-frontend: build
 test-ir: build
     {{build_dir}}/toyc-ir-tests
 
+test-codegen: build
+    {{build_dir}}/toyc-codegen-tests
+
 test-filter filter: build
     {{build_dir}}/toyc-frontend-tests --gtest_filter='{{filter}}'
     {{build_dir}}/toyc-ir-tests --gtest_filter='{{filter}}'
+    {{build_dir}}/toyc-codegen-tests --gtest_filter='{{filter}}'
+
+emit-asm file=sample: build
+    {{build_dir}}/toyc-compiler < {{file}}
 
 coverage: configure-coverage
     cmake --build {{build_dir}} --target coverage
