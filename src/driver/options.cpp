@@ -14,7 +14,8 @@ void print_usage(std::ostream& output) {
            << "  -dump-ast            dump AST to stderr\n"
            << "  -dump-ir             dump IR to stderr\n"
            << "  -dump-asm            alias of -dump-ir\n"
-           << "  -opt                 enable optimizations (reserved)\n";
+           << "  -opt                 enable optimizations (reserved)\n"
+           << "  -mem2reg-only        run mem2reg only (test isolation)\n";
 }
 
 CompilerOptions parse_options(int argc, char* argv[], DiagnosticEngine& diagnostics) {
@@ -29,6 +30,8 @@ CompilerOptions parse_options(int argc, char* argv[], DiagnosticEngine& diagnost
             options.dump_ir = true;
         } else if (arg == "-opt") {
             options.opt_mode = true;
+        } else if (arg == "-mem2reg-only") {
+            options.mem2reg_only = true;
         } else {
             diagnostics.error(DiagnosticStage::Driver, SourceLoc{0, 0},
                               "unknown argument: " + arg);
