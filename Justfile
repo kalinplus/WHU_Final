@@ -26,9 +26,17 @@ build-run file=sample flags="-dump-ast": build
 
 test: build
     {{build_dir}}/toyc-frontend-tests
+    {{build_dir}}/toyc-ir-tests
+
+test-frontend: build
+    {{build_dir}}/toyc-frontend-tests
+
+test-ir: build
+    {{build_dir}}/toyc-ir-tests
 
 test-filter filter: build
     {{build_dir}}/toyc-frontend-tests --gtest_filter='{{filter}}'
+    {{build_dir}}/toyc-ir-tests --gtest_filter='{{filter}}'
 
 coverage: configure-coverage
     cmake --build {{build_dir}} --target coverage
