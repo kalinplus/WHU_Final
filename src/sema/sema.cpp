@@ -338,6 +338,25 @@ private:
 
     ExprValueType analyze_binary(const Expr& expr, const BinaryExpr& binary) {
         require_int_expr(*binary.lhs, "left operand");
+
+        if (binary.op == BinaryOp::And) {
+            if (auto lhs_const = eval_const_expr(*binary.lhs)) {
+                if (*lhs_const == 0) {
+                    result_.expr_types[&expr] = ExprValueType::Int;
+                    result_.const_values[&expr] = 0;
+                    return ExprValueType::Int;
+                }
+            }
+        } else if (binary.op == BinaryOp::Or) {
+            if (auto lhs_const = eval_const_expr(*binary.lhs)) {
+                if (*lhs_const != 0) {
+                    result_.expr_types[&expr] = ExprValueType::Int;
+                    result_.const_values[&expr] = 1;
+                    return ExprValueType::Int;
+                }
+            }
+        }
+
         require_int_expr(*binary.rhs, "right operand");
         result_.expr_types[&expr] = ExprValueType::Int;
         if (auto value = eval_const_expr(expr)) {
@@ -420,6 +439,39 @@ private:
                 return std::nullopt;
             }
             case Expr::Kind::Binary: {
+                switch (expr.binary.op) {
+                    case BinaryOp::And: {
+                        auto lhs = eval_const_expr(*expr.binary.lhs);
+                        if (!lhs) {
+                            return std::nullopt;
+                        }
+                        if (*lhs == 0) {
+                            return 0;
+                        }
+                        auto rhs = eval_const_expr(*expr.binary.rhs);
+                        if (!rhs) {
+                            return std::nullopt;
+                        }
+                        return static_cast<int>(*rhs != 0);
+                    }
+                    case BinaryOp::Or: {
+                        auto lhs = eval_const_expr(*expr.binary.lhs);
+                        if (!lhs) {
+                            return std::nullopt;
+                        }
+                        if (*lhs != 0) {
+                            return 1;
+                        }
+                        auto rhs = eval_const_expr(*expr.binary.rhs);
+                        if (!rhs) {
+                            return std::nullopt;
+                        }
+                        return static_cast<int>(*rhs != 0);
+                    }
+                    default:
+                        break;
+                }
+
                 auto lhs = eval_const_expr(*expr.binary.lhs);
                 auto rhs = eval_const_expr(*expr.binary.rhs);
                 if (!lhs || !rhs) {
@@ -456,10 +508,8 @@ private:
                         return *lhs == *rhs;
                     case BinaryOp::Ne:
                         return *lhs != *rhs;
-                    case BinaryOp::And:
-                        return (*lhs != 0) && (*rhs != 0);
-                    case BinaryOp::Or:
-                        return (*lhs != 0) || (*rhs != 0);
+                    default:
+                        break;
                 }
                 return std::nullopt;
             }
