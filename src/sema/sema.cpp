@@ -45,10 +45,16 @@ public:
 private:
     struct SuppressConstEvalGuard {
         Analyzer& analyzer;
+
         explicit SuppressConstEvalGuard(Analyzer& analyzer_ref) : analyzer(analyzer_ref) {
             ++analyzer.suppress_const_eval_depth_;
         }
         ~SuppressConstEvalGuard() { --analyzer.suppress_const_eval_depth_; }
+
+        SuppressConstEvalGuard(const SuppressConstEvalGuard&) = delete;
+        SuppressConstEvalGuard& operator=(const SuppressConstEvalGuard&) = delete;
+        SuppressConstEvalGuard(SuppressConstEvalGuard&&) = delete;
+        SuppressConstEvalGuard& operator=(SuppressConstEvalGuard&&) = delete;
     };
 
     bool const_eval_enabled() const { return suppress_const_eval_depth_ == 0; }
